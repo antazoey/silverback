@@ -1,36 +1,57 @@
 import asyncio
 import os
+import shlex
+import subprocess
+from datetime import timedelta
+from pathlib import Path
 
 import click
 import yaml  # type: ignore[import-untyped]
+from ape.api import AccountAPI, NetworkAPI
 from ape.cli import (
     AccountAliasPromptChoice,
     ConnectedProviderCommand,
+    account_option,
     ape_cli_context,
     network_option,
 )
-from ape.exceptions import Abort
+from ape.contracts import ContractInstance
+from ape.exceptions import Abort, ApeException
 from fief_client.integrations.cli import FiefAuth
 
 from silverback._click_ext import (
     SectionedHelpGroup,
     auth_required,
+    bot_path_callback,
     cls_import_callback,
     cluster_client,
     display_login_message,
     platform_client,
+    timedelta_callback,
+    token_amount_callback,
 )
-from silverback._importer import import_from_string
 from silverback.cluster.client import ClusterClient, PlatformClient
-from silverback.cluster.types import ClusterTier
+from silverback.cluster.types import ClusterTier, ResourceStatus
 from silverback.runner import PollingRunner, WebsocketRunner
 from silverback.worker import run_worker
+
+DOCKERFILE_CONTENT = """
+FROM ghcr.io/apeworx/silverback:stable
+USER root
+WORKDIR /app
+RUN chown harambe:harambe /app
+USER harambe
+COPY ape-config.yaml .
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN ape plugins install .
+"""
 
 
 @click.group(cls=SectionedHelpGroup)
 def cli():
     """
-    Silverback: Build Python apps that react to on-chain events
+    Silverback: Build Python bots that react to on-chain events
 
     To learn more about our cloud offering, please check out https://silverback.apeworx.io
     """
@@ -87,9 +108,9 @@ def _network_callback(ctx, param, val):
     callback=cls_import_callback,
 )
 @click.option("-x", "--max-exceptions", type=int, default=3)
-@click.argument("path")
-def run(cli_ctx, account, runner_class, recorder_class, max_exceptions, path):
-    """Run Silverback application"""
+@click.argument("bot", required=False, callback=bot_path_callback)
+def run(cli_ctx, account, runner_class, recorder_class, max_exceptions, bot):
+    """Run Silverback bot"""
 
     if not runner_class:
         # NOTE: Automatically select runner class
@@ -99,16 +120,70 @@ def run(cli_ctx, account, runner_class, recorder_class, max_exceptions, path):
             runner_class = PollingRunner
         else:
             raise click.BadOptionUsage(
-                option_name="network", message="Network choice cannot support running app"
+                option_name="network", message="Network choice cannot support running bot"
             )
 
-    app = import_from_string(path)
     runner = runner_class(
-        app,
+        bot,
         recorder=recorder_class() if recorder_class else None,
         max_exceptions=max_exceptions,
     )
     asyncio.run(runner.run())
+
+
+@cli.command(section="Local Commands")
+@click.option("--generate", is_flag=True, default=False)
+@click.argument("path", required=False, type=str, default="bots")
+def build(generate, path):
+    """Generate Dockerfiles and build bot images"""
+    if generate:
+        if not (path := Path.cwd() / path).exists():
+            raise FileNotFoundError(
+                f"The bots directory '{path}' does not exist. "
+                "You should have a `{path}/` folder in the root of your project."
+            )
+        files = {file for file in path.iterdir() if file.is_file()}
+        bots = []
+        for file in files:
+            if "__init__" in file.name:
+                bots = [file]
+                break
+            bots.append(file)
+        for bot in bots:
+            dockerfile_content = DOCKERFILE_CONTENT
+            if "__init__" in bot.name:
+                docker_filename = f"Dockerfile.{bot.parent.name}"
+                dockerfile_content += f"COPY {path.name}/ /app/bot"
+            else:
+                docker_filename = f"Dockerfile.{bot.name.replace('.py', '')}"
+                dockerfile_content += f"COPY {path.name}/{bot.name} /app/bot.py"
+            dockerfile_path = Path.cwd() / ".silverback-images" / docker_filename
+            dockerfile_path.parent.mkdir(exist_ok=True)
+            dockerfile_path.write_text(dockerfile_content.strip() + "\n")
+            click.echo(f"Generated {dockerfile_path}")
+        return
+
+    if not (path := Path.cwd() / ".silverback-images").exists():
+        raise FileNotFoundError(
+            f"The dockerfile directory '{path}' does not exist. "
+            "You should have a `{path}/` folder in the root of your project."
+        )
+    dockerfiles = {file for file in path.iterdir() if file.is_file()}
+    for file in dockerfiles:
+        try:
+            command = shlex.split(
+                "docker build -f "
+                f"./{file.parent.name}/{file.name} "
+                f"-t {file.name.split('.')[1]}:latest ."
+            )
+            result = subprocess.run(
+                command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
+            )
+            click.echo(result.stdout)
+        except subprocess.CalledProcessError as e:
+            click.echo("Error during docker build:")
+            click.echo(e.stderr)
+            raise
 
 
 @cli.command(cls=ConnectedProviderCommand, section="Local Commands")
@@ -121,12 +196,10 @@ def run(cli_ctx, account, runner_class, recorder_class, max_exceptions, path):
 @click.option("-w", "--workers", type=int, default=2)
 @click.option("-x", "--max-exceptions", type=int, default=3)
 @click.option("-s", "--shutdown_timeout", type=int, default=90)
-@click.argument("path")
-def worker(cli_ctx, account, workers, max_exceptions, shutdown_timeout, path):
+@click.argument("bot", required=False, callback=bot_path_callback)
+def worker(cli_ctx, account, workers, max_exceptions, shutdown_timeout, bot):
     """Run Silverback task workers (advanced)"""
-
-    app = import_from_string(path)
-    asyncio.run(run_worker(app.broker, worker_count=workers, shutdown_timeout=shutdown_timeout))
+    asyncio.run(run_worker(bot.broker, worker_count=workers, shutdown_timeout=shutdown_timeout))
 
 
 @cli.command(section="Cloud Commands (https://silverback.apeworx.io)")
@@ -140,7 +213,7 @@ def login(auth: FiefAuth):
 
 @cli.group(cls=SectionedHelpGroup, section="Cloud Commands (https://silverback.apeworx.io)")
 def cluster():
-    """Manage a Silverback hosted application cluster
+    """Manage a Silverback hosted bot cluster
 
     For clusters on the Silverback Platform, please provide a name for the cluster to access under
     your platform account via `-c WORKSPACE/NAME`"""
@@ -192,21 +265,6 @@ def list_clusters(platform: PlatformClient, workspace: str):
     "cluster_slug",
     help="Slug for new cluster (Defaults to `name.lower()`)",
 )
-@click.option(
-    "-t",
-    "--tier",
-    default=ClusterTier.PERSONAL.name,
-    metavar="NAME",
-    help="Named set of options to use for cluster as a base (Defaults to Personal)",
-)
-@click.option(
-    "-c",
-    "--config",
-    "config_updates",
-    type=(str, str),
-    multiple=True,
-    help="Config options to set for cluster (overrides value of -t/--tier)",
-)
 @click.argument("workspace")
 @platform_client
 def new_cluster(
@@ -214,13 +272,114 @@ def new_cluster(
     workspace: str,
     cluster_name: str | None,
     cluster_slug: str | None,
-    tier: str,
-    config_updates: list[tuple[str, str]],
 ):
     """Create a new cluster in WORKSPACE"""
 
     if not (workspace_client := platform.workspaces.get(workspace)):
         raise click.BadOptionUsage("workspace", f"Unknown workspace '{workspace}'")
+
+    if cluster_name:
+        click.echo(f"name: {cluster_name}")
+        click.echo(f"slug: {cluster_slug or cluster_name.lower().replace(' ', '-')}")
+
+    elif cluster_slug:
+        click.echo(f"slug: {cluster_slug}")
+
+    cluster = workspace_client.create_cluster(
+        cluster_name=cluster_name,
+        cluster_slug=cluster_slug,
+    )
+    click.echo(f"{click.style('SUCCESS', fg='green')}: Created '{cluster.name}'")
+
+    if cluster.status == ResourceStatus.CREATED:
+        click.echo(
+            f"{click.style('WARNING', fg='yellow')}: To use this cluster, "
+            f"please pay via `silverback cluster pay create {workspace}/{cluster_slug}`"
+        )
+
+
+@cluster.group(cls=SectionedHelpGroup, section="Platform Commands (https://silverback.apeworx.io)")
+def pay():
+    """Pay for CLUSTER with Crypto using ApePay streaming payments"""
+
+
+@pay.command(name="create", cls=ConnectedProviderCommand)
+@account_option()
+@click.argument("cluster_path")
+@click.option(
+    "-t",
+    "--tier",
+    default=ClusterTier.PERSONAL.name.capitalize(),
+    metavar="NAME",
+    type=click.Choice(
+        [
+            ClusterTier.PERSONAL.name.capitalize(),
+            ClusterTier.PROFESSIONAL.name.capitalize(),
+        ]
+    ),
+    help="Named set of options to use for cluster as a base (Defaults to Personal)",
+)
+@click.option(
+    "-c",
+    "--config",
+    "config_updates",
+    metavar="KEY VALUE",
+    type=(str, str),
+    multiple=True,
+    help="Config options to set for cluster (overrides values from -t/--tier selection)",
+)
+@click.option("--token", metavar="ADDRESS", help="Token Symbol or Address to use to fund stream")
+@click.option(
+    "--amount",
+    "token_amount",
+    metavar="VALUE",
+    callback=token_amount_callback,
+    default=None,
+    help="Token amount to use to fund stream",
+)
+@click.option(
+    "--time",
+    "stream_time",
+    metavar="TIMESTAMP or TIMEDELTA",
+    callback=timedelta_callback,
+    default=None,
+    help="Time to fund stream for",
+)
+@platform_client
+def create_payment_stream(
+    platform: PlatformClient,
+    network: NetworkAPI,
+    account: AccountAPI,
+    cluster_path: str,
+    tier: str,
+    config_updates: list[tuple[str, str]],
+    token: ContractInstance | None,
+    token_amount: int | None,
+    stream_time: timedelta | None,
+):
+    """
+    Create a new streaming payment for a given CLUSTER
+
+    NOTE: This action cannot be cancelled! Streams must exist for at least 1 hour before cancelling.
+    """
+
+    if "/" not in cluster_path or len(cluster_path.split("/")) > 2:
+        raise click.BadArgumentUsage(f"Invalid cluster path: '{cluster_path}'")
+
+    workspace_name, cluster_name = cluster_path.split("/")
+    if not (workspace_client := platform.workspaces.get(workspace_name)):
+        raise click.BadArgumentUsage(f"Unknown workspace: '{workspace_name}'")
+
+    elif not (cluster := workspace_client.clusters.get(cluster_name)):
+        raise click.BadArgumentUsage(
+            f"Unknown cluster in workspace '{workspace_name}': '{cluster_name}'"
+        )
+
+    elif cluster.status != ResourceStatus.CREATED:
+        raise click.UsageError(f"Cannot fund '{cluster_path}': cluster has existing streams.")
+
+    elif token_amount is None and stream_time is None:
+        raise click.UsageError("Must specify one of '--amount' or '--time'.")
 
     if not hasattr(ClusterTier, tier.upper()):
         raise click.BadOptionUsage("tier", f"Invalid choice: {tier}")
@@ -230,31 +389,201 @@ def new_cluster(
     for k, v in config_updates:
         setattr(configuration, k, int(v) if v.isnumeric() else v)
 
-    if cluster_name:
-        click.echo(f"name: {cluster_name}")
-        click.echo(f"slug: {cluster_slug or cluster_name.lower().replace(' ', '-')}")
+    sm = platform.get_stream_manager(network.chain_id)
+    product = configuration.get_product_code(account.address, cluster.id)
 
-    elif cluster_slug:
-        click.echo(f"slug: {cluster_slug}")
+    if not token:
+        accepted_tokens = platform.get_accepted_tokens(network.chain_id)
+        token = accepted_tokens.get(
+            click.prompt(
+                "Select one of the following tokens to fund your stream with",
+                type=click.Choice(list(accepted_tokens)),
+            )
+        )
+    assert token  # mypy happy
+
+    if not token_amount:
+        assert stream_time  # mypy happy
+        one_token = 10 ** token.decimals()
+        token_amount = int(
+            one_token
+            * (
+                stream_time.total_seconds()
+                / sm.compute_stream_life(
+                    account.address, token, one_token, [product]
+                ).total_seconds()
+            )
+        )
+    else:
+        stream_time = sm.compute_stream_life(account.address, token, token_amount, [product])
+
+    assert token_amount  # mypy happy
 
     click.echo(yaml.safe_dump(dict(configuration=configuration.settings_display_dict())))
+    click.echo(f"duration: {stream_time}\n")
 
-    if not click.confirm("Do you want to make a new cluster with this configuration?"):
+    if not click.confirm(
+        f"Do you want to use this configuration to fund Cluster '{cluster_path}'?"
+    ):
         return
 
-    cluster = workspace_client.create_cluster(
-        cluster_name=cluster_name,
-        cluster_slug=cluster_slug,
-        configuration=configuration,
+    if not token.balanceOf(account) >= token_amount:
+        raise click.UsageError(
+            f"Do not have sufficient balance of '{token.symbol()}' to fund stream."
+        )
+
+    elif not token.allowance(account, sm.address) >= token_amount:
+        click.echo(f"Approve StreamManager({sm.address}) for '{token.symbol()}'")
+        token.approve(
+            sm.address,
+            2**256 - 1 if click.confirm("Unlimited Approval?") else token_amount,
+            sender=account,
+        )
+
+    # NOTE: will ask for approvals and do additional checks
+    try:
+        stream = sm.create(
+            token, token_amount, [product], min_stream_life=stream_time, sender=account
+        )
+    except ApeException as e:
+        raise click.UsageError(str(e)) from e
+
+    click.echo(f"{click.style('SUCCESS', fg='green')}: Cluster funded for {stream.time_left}.")
+
+    click.echo(
+        f"{click.style('WARNING', fg='yellow')}: Cluster may take up to 1 hour to deploy."
+        " Check back in 10-15 minutes using `silverback cluster info` to start using your cluster."
     )
-    click.echo(f"{click.style('SUCCESS', fg='green')}: Created '{cluster.name}'")
-    # TODO: Pay for cluster via new stream
 
 
-# `silverback cluster pay WORKSPACE/NAME --account ALIAS --time "10 days"`
-# TODO: Create a signature scheme for ClusterInfo
-#         (ClusterInfo configuration as plaintext, .id as nonce?)
-# TODO: Test payment w/ Signature validation of extra data
+@pay.command(name="add-time", cls=ConnectedProviderCommand)
+@account_option()
+@click.argument("cluster_path", metavar="CLUSTER")
+@click.option(
+    "--amount",
+    "token_amount",
+    metavar="VALUE",
+    callback=token_amount_callback,
+    default=None,
+    help="Token amount to use to fund stream",
+)
+@click.option(
+    "--time",
+    "stream_time",
+    metavar="TIMESTAMP or TIMEDELTA",
+    callback=timedelta_callback,
+    default=None,
+    help="Time to fund stream for",
+)
+@platform_client
+def fund_payment_stream(
+    platform: PlatformClient,
+    network: NetworkAPI,
+    account: AccountAPI,
+    cluster_path: str,
+    token_amount: int | None,
+    stream_time: timedelta | None,
+):
+    """
+    Fund an existing streaming payment for the given CLUSTER
+
+    NOTE: You can fund anyone else's Stream!
+    """
+
+    if "/" not in cluster_path or len(cluster_path.split("/")) > 2:
+        raise click.BadArgumentUsage(f"Invalid cluster path: '{cluster_path}'")
+
+    workspace_name, cluster_name = cluster_path.split("/")
+    if not (workspace_client := platform.workspaces.get(workspace_name)):
+        raise click.BadArgumentUsage(f"Unknown workspace: '{workspace_name}'")
+
+    elif not (cluster := workspace_client.clusters.get(cluster_name)):
+        raise click.BadArgumentUsage(
+            f"Unknown cluster in workspace '{workspace_name}': '{cluster_name}'"
+        )
+
+    elif cluster.status != ResourceStatus.RUNNING:
+        raise click.UsageError(f"Cannot fund '{cluster_info.name}': cluster is not running.")
+
+    elif not (stream := workspace_client.get_payment_stream(cluster, network.chain_id)):
+        raise click.UsageError("Cluster is not funded via ApePay Stream")
+
+    elif token_amount is None and stream_time is None:
+        raise click.UsageError("Must specify one of '--amount' or '--time'.")
+
+    if not token_amount:
+        assert stream_time  # mypy happy
+        one_token = 10 ** stream.token.decimals()
+        token_amount = int(
+            one_token
+            * (
+                stream_time.total_seconds()
+                / stream.manager.compute_stream_life(
+                    account.address, stream.token, one_token, stream.products
+                ).total_seconds()
+            )
+        )
+
+    if not stream.token.balanceOf(account) >= token_amount:
+        raise click.UsageError("Do not have sufficient funding")
+
+    elif not stream.token.allowance(account, stream.manager.address) >= token_amount:
+        click.echo(f"Approving StreamManager({stream.manager.address})")
+        stream.token.approve(
+            stream.manager.address,
+            2**256 - 1 if click.confirm("Unlimited Approval?") else token_amount,
+            sender=account,
+        )
+
+    click.echo(
+        f"Funding Stream for Cluster '{cluster_path}' with "
+        f"{token_amount / 10**stream.token.decimals():0.4f} {stream.token.symbol()}"
+    )
+    stream.add_funds(token_amount, sender=account)
+
+    click.echo(f"{click.style('SUCCESS', fg='green')}: Cluster funded for {stream.time_left}.")
+
+
+@pay.command(name="cancel", cls=ConnectedProviderCommand)
+@account_option()
+@click.argument("cluster_path", metavar="CLUSTER")
+@platform_client
+def cancel_payment_stream(
+    platform: PlatformClient,
+    network: NetworkAPI,
+    account: AccountAPI,
+    cluster_path: str,
+):
+    """
+    Shutdown CLUSTER and refund all funds to Stream owner
+
+    NOTE: Only the Stream owner can perform this action!
+    """
+
+    if "/" not in cluster_path or len(cluster_path.split("/")) > 2:
+        raise click.BadArgumentUsage(f"Invalid cluster path: '{cluster_path}'")
+
+    workspace_name, cluster_name = cluster_path.split("/")
+    if not (workspace_client := platform.workspaces.get(workspace_name)):
+        raise click.BadArgumentUsage(f"Unknown workspace: '{workspace_name}'")
+
+    elif not (cluster := workspace_client.clusters.get(cluster_name)):
+        raise click.BadArgumentUsage(
+            f"Unknown cluster in workspace '{workspace_name}': '{cluster_name}'"
+        )
+
+    elif cluster.status != ResourceStatus.RUNNING:
+        raise click.UsageError(f"Cannot fund '{cluster_info.name}': cluster is not running.")
+
+    elif not (stream := workspace_client.get_payment_stream(cluster, network.chain_id)):
+        raise click.UsageError("Cluster is not funded via ApePay Stream")
+
+    if click.confirm(
+        click.style("This action is irreversible, are you sure?", bold=True, bg="red")
+    ):
+        stream.cancel(sender=account)
+
+    click.echo(f"{click.style('WARNING', fg='yellow')}: Cluster cannot be used anymore.")
 
 
 @cluster.command(name="info")
@@ -278,6 +607,86 @@ def cluster_health(cluster: ClusterClient):
     """Get Health information about a CLUSTER"""
 
     click.echo(yaml.safe_dump(cluster.health.model_dump()))
+
+
+@cluster.group(cls=SectionedHelpGroup)
+def registry():
+    """Manage container registry configuration"""
+
+
+@registry.group(cls=SectionedHelpGroup, name="auth")
+def registry_auth():
+    """Manage private container registry credentials"""
+
+
+@registry_auth.command(name="list")
+@cluster_client
+def credentials_list(cluster: ClusterClient):
+    """List container registry credentials"""
+
+    if creds := list(cluster.registry_credentials):
+        click.echo(yaml.safe_dump(creds))
+
+    else:
+        click.secho("No registry credentials present in this cluster", bold=True, fg="red")
+
+
+@registry_auth.command(name="info")
+@click.argument("name")
+@cluster_client
+def credentials_info(cluster: ClusterClient, name: str):
+    """Show info about registry credentials"""
+
+    if not (creds := cluster.registry_credentials.get(name)):
+        raise click.UsageError(f"Unknown credentials '{name}'")
+
+    click.echo(yaml.safe_dump(creds.model_dump(exclude={"id", "name"})))
+
+
+@registry_auth.command(name="new")
+@click.argument("name")
+@click.argument("registry")
+@cluster_client
+def credentials_new(cluster: ClusterClient, name: str, registry: str):
+    """Add registry private registry credentials. This command will prompt you for a username and
+    password.
+    """
+
+    username = click.prompt("Username")
+    password = click.prompt("Password", hide_input=True)
+
+    creds = cluster.new_credentials(
+        name=name, hostname=registry, username=username, password=password
+    )
+    click.echo(yaml.safe_dump(creds.model_dump(exclude={"id"})))
+
+
+@registry_auth.command(name="update")
+@click.argument("name")
+@click.option("-r", "--registry")
+@cluster_client
+def credentials_update(cluster: ClusterClient, name: str, registry: str | None = None):
+    """Update registry registry credentials"""
+    if not (creds := cluster.registry_credentials.get(name)):
+        raise click.UsageError(f"Unknown credentials '{name}'")
+
+    username = click.prompt("Username")
+    password = click.prompt("Password", hide_input=True)
+
+    creds = creds.update(hostname=registry, username=username, password=password)
+    click.echo(yaml.safe_dump(creds.model_dump(exclude={"id"})))
+
+
+@registry_auth.command(name="remove")
+@click.argument("name")
+@cluster_client
+def credentials_remove(cluster: ClusterClient, name: str):
+    """Remove a set of registry credentials"""
+    if not (creds := cluster.registry_credentials.get(name)):
+        raise click.UsageError(f"Unknown credentials '{name}'")
+
+    creds.remove()  # NOTE: No confirmation because can only delete if no references exist
+    click.secho(f"registry credentials '{creds.name}' removed.", fg="green", bold=True)
 
 
 @cluster.group(cls=SectionedHelpGroup)
@@ -425,6 +834,12 @@ def bots():
 @click.option("-n", "--network", required=True)
 @click.option("-a", "--account")
 @click.option("-g", "--group", "vargroups", multiple=True)
+@click.option(
+    "-r",
+    "--registry-credentials",
+    "registry_credentials_name",
+    help="registry credentials to use to pull the image",
+)
 @click.argument("name")
 @cluster_client
 def new_bot(
@@ -433,6 +848,7 @@ def new_bot(
     network: str,
     account: str | None,
     vargroups: list[str],
+    registry_credentials_name: str | None,
     name: str,
 ):
     """Create a new bot in a CLUSTER with the given configuration"""
@@ -442,17 +858,34 @@ def new_bot(
 
     environment = [cluster.variable_groups[vg_name].get_revision("latest") for vg_name in vargroups]
 
+    registry_credentials_id = None
+    if registry_credentials_name:
+        if not (
+            creds := cluster.registry_credentials.get(registry_credentials_name)
+        ):  # NOTE: Check if credentials exist
+            raise click.UsageError(f"Unknown registry credentials '{registry_credentials_name}'")
+        registry_credentials_id = creds.id
+
     click.echo(f"Name: {name}")
     click.echo(f"Image: {image}")
     click.echo(f"Network: {network}")
     if environment:
         click.echo("Environment:")
         click.echo(yaml.safe_dump([var for vg in environment for var in vg.variables]))
+    if registry_credentials_id:
+        click.echo(f"registry credentials: {registry_credentials_name}")
 
     if not click.confirm("Do you want to create and start running this bot?"):
         return
 
-    bot = cluster.new_bot(name, image, network, account=account, environment=environment)
+    bot = cluster.new_bot(
+        name,
+        image,
+        network,
+        account=account,
+        environment=environment,
+        registry_credentials_id=registry_credentials_id,
+    )
     click.secho(f"Bot '{bot.name}' ({bot.id}) deploying...", fg="green", bold=True)
 
 
@@ -478,7 +911,21 @@ def bot_info(cluster: ClusterClient, bot_name: str):
         raise click.UsageError(f"Unknown bot '{bot_name}'.")
 
     # NOTE: Skip machine `.id`, and we already know it is `.name`
-    click.echo(yaml.safe_dump(bot.model_dump(exclude={"id", "name", "environment"})))
+    bot_dump = bot.model_dump(
+        exclude={
+            "id",
+            "name",
+            "environment",
+            "registry_credentials_id",
+            "registry_credentials",
+        }
+    )
+    if bot.registry_credentials:
+        bot_dump["registry_credentials"] = bot.registry_credentials.model_dump(
+            exclude={"id", "name"}
+        )
+
+    click.echo(yaml.safe_dump(bot_dump))
     if bot.environment:
         click.echo("environment:")
         click.echo(yaml.safe_dump([var.name for var in bot.environment]))
@@ -490,6 +937,12 @@ def bot_info(cluster: ClusterClient, bot_name: str):
 @click.option("-n", "--network")
 @click.option("-a", "--account")
 @click.option("-g", "--group", "vargroups", multiple=True)
+@click.option(
+    "-r",
+    "--registry-credentials",
+    "registry_credentials_name",
+    help="registry credentials to use to pull the image",
+)
 @click.argument("name", metavar="BOT")
 @cluster_client
 def update_bot(
@@ -499,6 +952,7 @@ def update_bot(
     network: str | None,
     account: str | None,
     vargroups: list[str],
+    registry_credentials_name: str | None,
     name: str,
 ):
     """Update configuration of BOT in CLUSTER
@@ -516,6 +970,14 @@ def update_bot(
 
     if network:
         click.echo(f"Network:\n  old: {bot.network}\n  new: {network}")
+
+    registry_credentials_id = None
+    if registry_credentials_name:
+        if not (
+            creds := cluster.registry_credentials.get(registry_credentials_name)
+        ):  # NOTE: Check if credentials exist
+            raise click.UsageError(f"Unknown registry credentials '{registry_credentials_name}'")
+        registry_credentials_id = creds.id
 
     redeploy_required = False
     if image:
@@ -550,6 +1012,7 @@ def update_bot(
         network=network,
         account=account,
         environment=environment if set_environment else None,
+        registry_credentials_id=registry_credentials_id,
     )
 
     # NOTE: Skip machine `.id`

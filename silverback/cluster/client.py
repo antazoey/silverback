@@ -2,16 +2,21 @@ from functools import cache
 from typing import ClassVar, Literal
 
 import httpx
+from ape import Contract
+from ape.contracts import ContractInstance
+from apepay import Stream, StreamManager
+from pydantic import computed_field
 
 from silverback.version import version
 
 from .types import (
     BotHealth,
     BotInfo,
-    ClusterConfiguration,
     ClusterHealth,
     ClusterInfo,
     ClusterState,
+    RegistryCredentialsInfo,
+    StreamInfo,
     VariableGroupInfo,
     WorkspaceInfo,
 )
@@ -51,6 +56,33 @@ def handle_error_with_response(response: httpx.Response):
     response.raise_for_status()
 
     assert response.status_code < 300, "Should follow redirects, so not sure what the issue is"
+
+
+class RegistryCredentials(RegistryCredentialsInfo):
+    # NOTE: Client used only for this SDK
+    # NOTE: DI happens in `ClusterClient.__init__`
+    cluster: ClassVar["ClusterClient"]
+
+    def __hash__(self) -> int:
+        return int(self.id)
+
+    def update(
+        self,
+        name: str | None = None,
+        hostname: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> "RegistryCredentials":
+        response = self.cluster.put(
+            f"/credentials/{self.id}",
+            json=dict(name=name, hostname=hostname, username=username, password=password),
+        )
+        handle_error_with_response(response)
+        return self
+
+    def remove(self):
+        response = self.cluster.delete(f"/credentials/{self.id}")
+        handle_error_with_response(response)
 
 
 class VariableGroup(VariableGroupInfo):
@@ -103,6 +135,7 @@ class Bot(BotInfo):
         network: str | None = None,
         account: str | None = None,
         environment: list[VariableGroupInfo] | None = None,
+        registry_credentials_id: str | None = None,
     ) -> "Bot":
         form: dict = dict(
             name=name,
@@ -115,6 +148,9 @@ class Bot(BotInfo):
             form["environment"] = [
                 dict(id=str(env.id), revision=env.revision) for env in environment
             ]
+
+        if registry_credentials_id:
+            form["registry_credentials_id"] = registry_credentials_id
 
         response = self.cluster.put(f"/bots/{self.id}", json=form)
         handle_error_with_response(response)
@@ -137,6 +173,15 @@ class Bot(BotInfo):
         # NOTE: Currently, a noop PUT request will trigger a start
         response = self.cluster.put(f"/bots/{self.id}", json=dict(name=self.name))
         handle_error_with_response(response)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def registry_credentials(self) -> RegistryCredentials | None:
+        if self.registry_credentials_id:
+            for v in self.cluster.registry_credentials.values():
+                if v.id == self.registry_credentials_id:
+                    return v
+        return None
 
     @property
     def errors(self) -> list[str]:
@@ -164,6 +209,7 @@ class ClusterClient(httpx.Client):
         super().__init__(*args, **kwargs)
 
         # DI for other client classes
+        RegistryCredentials.cluster = self  # Connect to cluster client
         VariableGroup.cluster = self  # Connect to cluster client
         Bot.cluster = self  # Connect to cluster client
 
@@ -199,6 +245,24 @@ class ClusterClient(httpx.Client):
         return ClusterHealth.model_validate(response.json())
 
     @property
+    def registry_credentials(self) -> dict[str, RegistryCredentials]:
+        response = self.get("/credentials")
+        handle_error_with_response(response)
+        return {
+            creds.name: creds for creds in map(RegistryCredentials.model_validate, response.json())
+        }
+
+    def new_credentials(
+        self, name: str, hostname: str, username: str, password: str
+    ) -> RegistryCredentials:
+        response = self.post(
+            "/credentials",
+            json=dict(name=name, hostname=hostname, username=username, password=password),
+        )
+        handle_error_with_response(response)
+        return RegistryCredentials.model_validate(response.json())
+
+    @property
     def variable_groups(self) -> dict[str, VariableGroup]:
         response = self.get("/variables")
         handle_error_with_response(response)
@@ -222,6 +286,7 @@ class ClusterClient(httpx.Client):
         network: str,
         account: str | None = None,
         environment: list[VariableGroupInfo] | None = None,
+        registry_credentials_id: str | None = None,
     ) -> Bot:
         form: dict = dict(
             name=name,
@@ -234,6 +299,9 @@ class ClusterClient(httpx.Client):
             form["environment"] = [
                 dict(id=str(env.id), revision=env.revision) for env in environment
             ]
+
+        if registry_credentials_id:
+            form["registry_credentials_id"] = registry_credentials_id
 
         response = self.post("/bots", json=form)
         handle_error_with_response(response)
@@ -286,22 +354,34 @@ class Workspace(WorkspaceInfo):
         self,
         cluster_slug: str | None = None,
         cluster_name: str | None = None,
-        configuration: ClusterConfiguration = ClusterConfiguration(),
     ) -> ClusterInfo:
         response = self.client.post(
             "/clusters/",
             params=dict(workspace=str(self.id)),
-            json=dict(
-                name=cluster_name,
-                slug=cluster_slug,
-                configuration=configuration.model_dump(),
-            ),
+            json=dict(name=cluster_name, slug=cluster_slug),
         )
 
         handle_error_with_response(response)
         new_cluster = ClusterInfo.model_validate_json(response.text)
         self.clusters.update({new_cluster.slug: new_cluster})  # NOTE: Update cache
         return new_cluster
+
+    def get_payment_stream(self, cluster: ClusterInfo, chain_id: int) -> Stream | None:
+        response = self.client.get(
+            f"/clusters/{cluster.id}/stream",
+            params=dict(workspace=str(self.id)),
+        )
+        handle_error_with_response(response)
+
+        if not (raw_stream_info := response.json()):
+            return None
+
+        stream_info = StreamInfo.model_validate(raw_stream_info)
+
+        if not stream_info.chain_id == chain_id:
+            return None
+
+        return Stream(manager=StreamManager(stream_info.manager), id=stream_info.stream_id)
 
 
 class PlatformClient(httpx.Client):
@@ -352,3 +432,15 @@ class PlatformClient(httpx.Client):
         new_workspace = Workspace.model_validate_json(response.text)
         self.workspaces.update({new_workspace.slug: new_workspace})  # NOTE: Update cache
         return new_workspace
+
+    def get_stream_manager(self, chain_id: int) -> StreamManager:
+        response = self.get(f"/streams/manager/{chain_id}")
+        handle_error_with_response(response)
+        return StreamManager(response.json())
+
+    def get_accepted_tokens(self, chain_id: int) -> dict[str, ContractInstance]:
+        response = self.get(f"/streams/tokens/{chain_id}")
+        handle_error_with_response(response)
+        return {
+            token_info["symbol"]: Contract(token_info["address"]) for token_info in response.json()
+        }

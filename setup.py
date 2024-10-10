@@ -7,7 +7,8 @@ extras_require = {
         "pytest>=6.0",  # Core testing package
         "pytest-xdist",  # Multi-process runner
         "pytest-cov",  # Coverage analyzer plugin
-        # "hypothesis>=6.2.0,<7.0",  # Strategy-based fuzzer
+        "hypothesis",  # Strategy-based fuzzer
+        "hypothesis-jsonschema",  # Generate strategies for pydantic models
     ],
     "lint": [
         "black>=24",  # Auto-formatter and linter
@@ -20,14 +21,7 @@ extras_require = {
         "mdformat-frontmatter>=2.0",  # Needed for frontmatters-style headers in issue templates
         "mdformat-pyproject>=0.0.1",  # Allows configuring in pyproject.toml
     ],
-    "doc": [
-        "myst-parser>=1.0.0,<2",  # Parse markdown docs
-        "sphinx-click>=4.4.0,<5",  # For documenting CLI
-        "Sphinx>=6.1.3,<7",  # Documentation generator
-        "sphinx_rtd_theme>=1.2.0,<2",  # Readthedocs.org theme
-        "sphinxcontrib-napoleon>=0.7",  # Allow Google-style documentation
-        "sphinx-plausible>=0.1.2,<0.2",
-    ],
+    "doc": ["sphinx-ape"],
     "release": [  # `release` GitHub Action job uses this
         "setuptools",  # Installation tool
         "wheel",  # Packaging tool
@@ -35,7 +29,7 @@ extras_require = {
     ],
     "dev": [
         "commitizen",  # Manage commits and publishing releases
-        "pre-commit",  # Ensure that linters are run prior to commiting
+        "pre-commit",  # Ensure that linters are run prior to committing
         "pytest-watch",  # `ptw` test watcher/runner
         "IPython",  # Console for interacting
         "ipdb",  # Debugger (Must use `export PYTHONBREAKPOINT=ipdb.set_trace`)
@@ -67,6 +61,7 @@ setup(
     url="https://github.com/ApeWorX/silverback",
     include_package_data=True,
     install_requires=[
+        "apepay>=0.3.1,<1",
         "click",  # Use same version as eth-ape
         "eth-ape>=0.7,<1.0",
         "ethpm-types>=0.6.10",  # lower pin only, `eth-ape` governs upper pin

@@ -1,7 +1,11 @@
+from datetime import datetime, timedelta
 from functools import update_wrapper
 from pathlib import Path
 
 import click
+from ape import Contract, convert
+from ape.contracts import ContractInstance
+from ape.types import AddressType
 from fief_client import Fief
 from fief_client.integrations.cli import FiefAuth, FiefAuthNotAuthenticatedError
 
@@ -14,6 +18,8 @@ from silverback.cluster.settings import (
     PlatformProfile,
     ProfileSettings,
 )
+
+from .exceptions import ImportFromStringError
 
 # NOTE: only load once
 settings = ProfileSettings.from_config_file()
@@ -28,6 +34,66 @@ def cls_import_callback(ctx, param, cls_name):
 
     # If class not found, `import_from_string` returns `None`, so raise
     raise click.BadParameter(message=f"Failed to import {param} class: '{cls_name}'.")
+
+
+def contract_callback(
+    ctx: click.Context, param: click.Parameter, contract_address: str
+) -> ContractInstance:
+    return Contract(convert(contract_address, AddressType))
+
+
+def token_amount_callback(
+    ctx: click.Context,
+    param: click.Parameter,
+    token_amount: str | None,
+) -> int | None:
+    if token_amount is None:
+        return None
+
+    return convert(token_amount, int)
+
+
+def timedelta_callback(
+    ctx: click.Context, param: click.Parameter, timestamp_or_str: str | None
+) -> timedelta | None:
+    if timestamp_or_str is None:
+        return None
+
+    try:
+        timestamp = datetime.fromisoformat(timestamp_or_str)
+    except ValueError:
+        timestamp = None
+
+    if timestamp:
+        if timestamp <= (now := datetime.now()):
+            raise click.BadParameter("Must be a time in the future.", ctx=ctx, param=param)
+        return timestamp - now
+
+    elif " " in timestamp_or_str:
+        units_value = {}
+        for time_units in map(lambda s: s.strip(), timestamp_or_str.split(",")):
+
+            time, units = time_units.split(" ")
+            if not units.endswith("s"):
+                units += "s"
+
+            if units not in {"seconds", "minutes", "hours", "days", "weeks"}:
+                raise click.BadParameter(
+                    f"Not spelled properly: '{time_units}'.", ctx=ctx, param=param
+                )
+
+            units_value[units] = int(time)
+
+        return timedelta(**units_value)  # type: ignore[arg-type]
+
+    elif timestamp_or_str.isnumeric():
+        return timedelta(seconds=int(timestamp_or_str))
+
+    raise click.BadParameter(
+        "Must be an ISO timestamp (in the future), or a timedelta like '1 week'.",
+        ctx=ctx,
+        param=param,
+    )
 
 
 class OrderedCommands(click.Group):
@@ -54,6 +120,18 @@ class SectionedHelpGroup(OrderedCommands):
         super().__init__(*args, commands=commands, **kwargs)
 
     def command(self, *args, **kwargs):
+        section = kwargs.pop("section", "Commands")
+        decorator = super().command(*args, **kwargs)
+
+        def new_decorator(f):
+            cmd = decorator(f)
+            cmd.section = section
+            self.sections.setdefault(section, []).append(cmd)
+            return cmd
+
+        return new_decorator
+
+    def group(self, *args, **kwargs):
         section = kwargs.pop("section", "Commands")
         decorator = super().command(*args, **kwargs)
 
@@ -242,3 +320,15 @@ def cluster_client(f):
         return ctx.invoke(f, *args, **kwargs)
 
     return update_wrapper(get_cluster_client, f)
+
+
+def bot_path_callback(ctx: click.Context, param: click.Parameter, path: str | None):
+    if not path:
+        path = "bot:bot"
+    elif ":" not in path:
+        path += ":bot"
+
+    try:
+        return import_from_string(path)
+    except ImportFromStringError:
+        return import_from_string(f"bots.{path}")
