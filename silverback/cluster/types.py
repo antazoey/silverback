@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import enum
-import math
+import re
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, ClassVar
 
-from ape.logging import LogLevel
+from ape.logging import CLICK_STYLE_KWARGS, LogLevel
 from ape.types import AddressType, HexBytes
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.hmac import HMAC, hashes
 from eth_utils import to_bytes, to_int
 from pydantic import BaseModel, Field, computed_field, field_validator
+from typing_extensions import Self
 
 
 def normalize_bytes(val: bytes, length: int = 16) -> bytes:
@@ -33,92 +34,61 @@ class ClusterConfiguration(BaseModel):
     #       processing through ApePay
     # NOTE: All defaults should be the minimal end of the scale, so that `__or__` works right
 
-    # Version byte (Byte 0)
-    # NOTE: Update this to revise new models for every configuration change
     version: int = 1
+    """Version of this configuration (used for encoding/decoding)"""
+    # NOTE: Update this to revise new models for every configuration change
 
-    # Bot Worker Configuration, priced per bot (Bytes 1-2)
-    cpu: Annotated[int, Field(ge=0, le=6)] = 0  # defaults to 0.25 vCPU
-    """Allocated vCPUs per bot:
-    - 0.25 vCPU (0)
-    - 0.50 vCPU (1)
-    - 1.00 vCPU (2)
-    - 2.00 vCPU (3)
-    - 4.00 vCPU (4)
-    - 8.00 vCPU (5)
-    - 16.0 vCPU (6)"""
+    # Cluster-wide limits on maximum usage (Bytes 1-2)
+    cpu: Annotated[int, Field(ge=1, le=64)] = 1  # defaults to 1 vCPU
+    """Max vCPUs shared by all bots in cluster"""
 
-    memory: Annotated[int, Field(ge=0, le=120)] = 0  # defaults to 512 MiB
-    """Total memory per bot (in GB, 0 means '512 MiB')"""
+    memory: Annotated[int, Field(ge=1, le=128)] = 1
+    """Max memory (in GiB) shared by all bots in cluster"""
 
-    # NOTE: # of workers configured based on cpu & memory settings
+    # NOTE: # of workers in each bot configured based on above cpu & memory settings
 
     # Runner configuration (Bytes 3-4)
     networks: Annotated[int, Field(ge=1, le=20)] = 1
-    """Maximum number of concurrent network runners"""
+    """Maximum number of concurrent networks all bots can use"""
 
     bots: Annotated[int, Field(ge=1, le=250)] = 1
-    """Maximum number of concurrent running bots"""
+    """Maximum number of guaranteed concurrently running bots"""
+    # NOTE: Some amount of spare capacity allowed over this limit, depending on cluster load
 
-    # NOTE: Byte 5 unused
+    # NOTE: Byte 5 is reserved for future use (non-breaking)
 
     # Recorder configuration (Bytes 6-7)
-    bandwidth: Annotated[int, Field(ge=0, le=250)] = 0  # 512 kB/sec
-    """Rate at which data should be emitted by cluster (in MB/sec, 0 means '512 kB')"""
-    # NOTE: This rate is only estimated average, and will serve as a throttling threshold
+    bandwidth: Annotated[int, Field(ge=1, le=250)] = 1  # 1 KiB/sec (~2.5 GiB/month)
+    """Rate at which data should be emitted by cluster (in KiB/sec)"""
+    # NOTE: This rate will serve as a throttling threshold on results processing / data streaming
 
     duration: Annotated[int, Field(ge=1, le=120)] = 1
     """Time to keep data recording duration (in months)"""
     # NOTE: The storage space alloted for your recordings will be `bandwidth x duration`.
     #       If the storage space is exceeded, it will be aggressively pruned to maintain that size.
-    #       We will also prune duration past that point less aggressively, if there is unused space.
+    #       We will also prune data with duration past this point, if there is unused space.
 
-    @field_validator("cpu", mode="before")
-    def parse_cpu_value(cls, value: str | int) -> int:
+    @field_validator("cpu", "memory", "bandwidth", mode="before")
+    def parse_units(cls, value: str | int) -> int:
         if not isinstance(value, str):
             return value
 
-        return round(math.log2(float(value.split(" ")[0]) * 1024 / 256))
-
-    @field_validator("memory", mode="before")
-    def parse_memory_value(cls, value: str | int) -> int:
-        if not isinstance(value, str):
-            return value
-
-        mem, units = value.split(" ")
-        if units.lower() in ("mib", "mb"):
-            assert mem == "512"
-            return 0
-
-        assert units.lower() == "gb"
-        return int(mem)
-
-    @field_validator("bandwidth", mode="before")
-    def parse_bandwidth_value(cls, value: str | int) -> int:
-        if not isinstance(value, str):
-            return value
-
-        bandwidth, units = value.split(" ")
-        if units.lower() == "b/sec":
-            assert bandwidth == "512"
-            return 0
-
-        assert units.lower() == "kb/sec"
-        return int(bandwidth)
+        amount, _ = value.split(" ")
+        return int(amount)
 
     def settings_display_dict(self) -> dict:
         return dict(
             version=self.version,
             runner=dict(
-                networks=self.networks,
                 bots=self.bots,
+                networks=self.networks,
             ),
-            bots=dict(
-                cpu=f"{256 * 2**self.cpu / 1024} vCPU",
-                memory=f"{self.memory} GB" if self.memory > 0 else "512 MiB",
+            cluster=dict(
+                cpu=f"{self.cpu} vCPU",
+                memory=f"{self.memory} GiB",
             ),
             recorder=dict(
-                bandwidth=f"{self.bandwidth} MB/sec" if self.bandwidth > 0 else "512 kB/sec",
+                bandwidth=f"{self.bandwidth} KiB/sec",
                 duration=f"{self.duration} months",
             ),
         )
@@ -211,19 +181,19 @@ class ClusterTier(enum.IntEnum):
     """Suggestions for different tier configurations"""
 
     STANDARD = ClusterConfiguration(
-        cpu="0.25 vCPU",
-        memory="512 MiB",
+        cpu="1 vCPU",
+        memory="2 GiB",
         networks=3,
         bots=5,
-        bandwidth="512 B/sec",  # 1.236 GB/mo
+        bandwidth="1 KiB/sec",  # 2.47 GB/mo
         duration=3,  # months
     ).encode()
     PREMIUM = ClusterConfiguration(
-        cpu="1 vCPU",
-        memory="2 GB",
+        cpu="4 vCPU",
+        memory="8 GiB",
         networks=10,
         bots=20,
-        bandwidth="5 kB/sec",  # 12.36 GB/mo
+        bandwidth="5 KiB/sec",  # 12.36 GB/mo
         duration=12,  # 1 year = ~148GB
     ).encode()
 
@@ -295,35 +265,24 @@ class ClusterInfo(BaseModel):
     last_updated: datetime  # Last time the resource was changed (upgrade, provisioning, etc.)
 
 
-class ClusterState(BaseModel):
-    """
-    Cluster Build Information and Configuration, direct from cluster control service
-    """
-
-    version: str = Field(alias="cluster_version")  # TODO: Rename in cluster
-    configuration: ClusterConfiguration | None = None  # TODO: Add to cluster
-    # TODO: Add other useful summary fields for frontend use
-
-
 class ServiceHealth(BaseModel):
     healthy: bool
 
 
 class ClusterHealth(BaseModel):
-    # TODO: Replace w/ cluster
-    ccs: ServiceHealth
     # NOTE: network => healthy
-    ars: dict[str, ServiceHealth] = {}
-    bots: dict[str, ServiceHealth] = {}
+    networks: dict[str, ServiceHealth] = Field(default_factory=dict)
+    bots: dict[str, ServiceHealth] = Field(default_factory=dict)
 
     @field_validator("bots", mode="before")  # TODO: Fix so this is default
     def convert_bot_health(cls, bots):
-        return {b["instance_id"]: ServiceHealth.model_validate(b) for b in bots}
+        return {k: ServiceHealth.model_validate(b) for k, b in bots.items()}
 
     @computed_field
     def cluster(self) -> ServiceHealth:
         return ServiceHealth(
-            healthy=all(ars.healthy for ars in self.ars.values()) and self.ccs.healthy
+            healthy=all(n.healthy for n in self.networks.values())
+            and all(b.healthy for b in self.bots.values())
         )
 
 
@@ -338,7 +297,6 @@ class RegistryCredentialsInfo(BaseModel):
 class VariableGroupInfo(BaseModel):
     id: uuid.UUID
     name: str
-    revision: int
     variables: list[str]
     created: datetime
 
@@ -353,30 +311,69 @@ class BotTaskStatus(BaseModel):
     stopped_reason: str | None
 
 
-class BotHealth(BaseModel):
-    bot_id: uuid.UUID
-    task_status: BotTaskStatus | None
-    healthy: bool
-
-
 class BotInfo(BaseModel):
     id: uuid.UUID  # TODO: Change `.instance_id` field to `id: UUID`
     name: str
     created: datetime
 
     image: str
+    credential_name: str | None
+    ecosystem: str
     network: str
+    provider: str
     account: str | None
-    revision: int
-    registry_credentials_id: str | None
-
-    vargroup: list[VariableGroupInfo] = []
+    environment: list[str]
 
 
 class BotLogEntry(BaseModel):
+    LOG_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"""^
+    (?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)\s
+    (?:
+        (?P<level>DEBUG:\s\s\s|INFO:\s\s\s\s|SUCCESS:\s|WARNING:\s|ERROR:\s\s\s)\s
+    )?
+    (?P<message>.*)$""",
+        re.VERBOSE,
+    )
+    # NOTE: Add offset (18+8+2=28) to all newlines in message after the first
+    LOGLINE_OFFSET: ClassVar[str] = "\n" + " " * 27 + "| "
+
+    level: LogLevel | None = None
+    timestamp: datetime | None = None
     message: str
-    timestamp: datetime | None
-    level: LogLevel
+
+    @classmethod
+    def parse_line(cls, line: str) -> Self:
+        # Typical line is like: `{timestamp} {str(log_level) + ':':<9} {message}`
+        if not (match := cls.LOG_PATTERN.match(line)):
+            return cls(message=line)
+
+        if level := match.group("level"):
+            level = LogLevel[level.strip()[:-1]]
+
+        return cls(
+            timestamp=match.group("timestamp"),
+            level=level,
+            message=match.group("message"),
+        )
 
     def __str__(self) -> str:
-        return f"{self.timestamp}: {self.message}"
+        from click import style as click_style
+
+        if self.level is not None:
+            styles = CLICK_STYLE_KWARGS.get(self.level, {})
+            level_str = click_style(f"{self.level.name:<8}", **styles)  # type: ignore[arg-type]
+        else:
+            level_str = ""
+
+        if self.timestamp is not None:
+            timestamp_str = click_style(f"{self.timestamp.astimezone():%x %X}", bold=True)
+        else:
+            timestamp_str = ""
+
+        if "\n" in (message := self.message):
+            message = self.LOGLINE_OFFSET.join(message.split("\n"))
+
+        # NOTE: Max size of `LogLevel` is 8 chars
+        # NOTE: Max size of normalized timestamp is 18 chars
+        return f"{timestamp_str:<18} {level_str:<8} | {message}"
