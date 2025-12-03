@@ -2,12 +2,12 @@
 <html lang="en" data-accent-color="lime" data-content_root="../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>silverback.middlewares - silverback documentation</title><link rel="shortcut icon" href="../_static/favicon.ico"/><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="silverback.runner" href="runner.html" /><link rel="prev" title="silverback.main" href="main.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>silverback.middlewares - silverback documentation</title><link rel="shortcut icon" href="../_static/favicon.ico"/><link rel="index" title="Index" href="../genindex.html" /><link rel="search" title="Search" href="../search.html" /><link rel="next" title="silverback.recorder" href="recorder.html" /><link rel="prev" title="silverback.main" href="main.html" />
       <link rel="canonical" href="silverback/methoddocs/middlewares.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
-  </script><link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=397bb51e" />
-    <link rel="stylesheet" type="text/css" href="../_static/shibuya.css?v=83eaa723" />
+  </script><link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=e1a1ceaf" />
+    <link rel="stylesheet" type="text/css" href="../_static/shibuya.css?v=14737038" />
     <link media="print" rel="stylesheet" type="text/css" href="../_static/print.css?v=20ff2c19" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,9 +19,9 @@
 }
 </style>
     <meta property="og:type" content="website"/>
-<meta property="og:url" content="silverback/methoddocs/middlewares.html"/>
-<meta property="og:title" content="silverback.middlewares"/>
-<meta name="twitter:card" content="summary"/>
+  <meta property="og:url" content="silverback/methoddocs/middlewares.html"/>
+  <meta property="og:title" content="silverback.middlewares"/>
+    <meta name="twitter:card" content="summary"/>
   </head>
 <body><div class="sy-head">
   <div class="sy-head-blur"></div>
@@ -31,7 +31,7 @@
       <img class="dark-logo" src="../_static/logo_green.svg" alt="silverback" height="28" loading="lazy" />
       <strong>silverback</strong>
     </a>
-    <div class="sy-head-nav" id="HeadNav">
+    <div class="sy-head-nav" id="head-nav">
       <nav class="sy-head-links"></nav>
       <div class="sy-head-extra flex items-center print:hidden"><form class="searchbox flex items-center" action="../search.html" method="get">
   <input type="text" name="q" placeholder="Search" />
@@ -43,11 +43,11 @@ data-aria-auto="Switch to light color mode"
 data-aria-light="Switch to dark color mode"
 data-aria-dark="Switch to auto color mode">
 <i class="i-lucide theme-icon"></i>
-</button><button class="md:hidden flex items-center js-menu" aria-label="Menu" type="button" aria-controls="HeadNav" aria-expanded="false">
+</button><button class="md:hidden flex items-center js-menu" aria-label="Menu" type="button" aria-controls="head-nav" aria-expanded="false">
         <div class="hamburger">
           <span class="hamburger_1"></span>
-          <span class="hamburger_2 -translate-x-2"></span>
-          <span class="hamburger_3 -translate-x-1"></span>
+          <span class="hamburger_2"></span>
+          <span class="hamburger_3"></span>
         </div>
       </button>
     </div>
@@ -61,20 +61,25 @@ data-aria-dark="Switch to auto color mode">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../userguides/quickstart.html">Quick Start</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../userguides/development.html">Developing Bots</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../userguides/platform.html">Deploying Bots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../userguides/managing.html">Silverback Platform</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../userguides/deploying.html">Deploying Bots</a></li>
 </ul>
 <p class="caption" role="heading" aria-level="3"><span class="caption-text">CLI Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="../commands/cluster.html">Cloud Platform</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../commands/run.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../commands/cluster.html">Cloud Platform</a></li>
 </ul>
 <p class="caption" role="heading" aria-level="3"><span class="caption-text">Python Reference</span></p>
 <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="cluster.html">silverback.cluster</a></li>
 <li class="toctree-l1"><a class="reference internal" href="exceptions.html">silverback.exceptions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="main.html">silverback.main</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">silverback.middlewares</a></li>
+<li class="toctree-l1"><a class="reference internal" href="recorder.html">silverback.recorder</a></li>
 <li class="toctree-l1"><a class="reference internal" href="runner.html">silverback.runner</a></li>
-<li class="toctree-l1"><a class="reference internal" href="subscriptions.html">silverback.subscriptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="settings.html">silverback.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="state.html">silverback.state</a></li>
+<li class="toctree-l1"><a class="reference internal" href="types.html">silverback.types</a></li>
 <li class="toctree-l1"><a class="reference internal" href="utils.html">silverback.utils</a></li>
 </ul>
 
@@ -87,10 +92,18 @@ data-aria-dark="Switch to auto color mode">
     <button class="rside-close js-menu xl:hidden" aria-label="Close Table of Contents" type="button" aria-controls="rside" aria-expanded="false">
       <i class="i-lucide close"></i>
     </button>
-    <div class="sy-scrollbar sy-rside-inner px-6 xl:top-16 xl:sticky xl:pl-0 pt-6 pb-4"><div id="ethical-ad-placement" data-ea-publisher="readthedocs"></div></div>
+    <div class="sy-scrollbar sy-rside-inner px-6 xl:top-16 xl:sticky xl:pl-0 pt-6 pb-4"><div class="localtoc"><h3>On this page</h3><ul>
+<li><a class="reference internal" href="#silverback.middlewares.SilverbackMiddleware"><code class="docutils literal notranslate"><span class="pre">SilverbackMiddleware</span></code></a><ul>
+<li><a class="reference internal" href="#silverback.middlewares.SilverbackMiddleware.post_execute"><code class="docutils literal notranslate">post_execute()</span></code></a></li>
+<li><a class="reference internal" href="#silverback.middlewares.SilverbackMiddleware.pre_execute"><code class="docutils literal notranslate">pre_execute()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</div><div id="ethical-ad-placement" data-ea-publisher="readthedocs"></div></div>
   </aside>
   <div class="rside-overlay js-menu" role="button" aria-label="Close Table of Contents" aria-controls="rside" aria-expanded="false"></div>
-  <main class="sy-main w-full max-sm:max-w-full print:pt-6"><div class="sy-breadcrumbs" role="navigation">
+  <main class="sy-main w-full max-sm:max-w-full print:pt-6">
+<div class="sy-breadcrumbs" role="navigation">
   <div class="sy-breadcrumbs-inner flex items-center">
     <div class="md:hidden mr-3">
       <button class="js-menu" aria-label="Menu" type="button" aria-controls="lside" aria-expanded="false">
@@ -119,6 +132,44 @@ data-aria-dark="Switch to auto color mode">
 <h1>silverback.middlewares<a class="headerlink" href="#silverback-middlewares" title="Link to this heading"></a></h1>
 <p>The <code class="docutils literal notranslate"><span class="pre">silverback.middlewares</span></code> module contains middleware intended to improve the usability of
 silverback as a whole, and add integrations for the silverback platform as well.</p>
+<dl class="py class" id="module-silverback.middlewares">
+<dt class="sig sig-object py" id="silverback.middlewares.SilverbackMiddleware">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">silverback.middlewares.</span></span><span class="sig-name descname"><span class="pre">SilverbackMiddleware</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#silverback.middlewares.SilverbackMiddleware" title="Link to this definition"></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">TaskiqMiddleware</span></code>, <code class="xref py py-class docutils literal notranslate"><span class="pre">ManagerAccessMixin</span></code></p>
+<dl class="py method">
+<dt class="sig sig-object py" id="silverback.middlewares.SilverbackMiddleware.post_execute">
+<span class="sig-name descname"><span class="pre">post_execute</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TaskiqMessage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TaskiqResult</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#silverback.middlewares.SilverbackMiddleware.post_execute" title="Link to this definition"></a></dt>
+<dd><p>This hook executes after task is complete.</p>
+<p>This is a worker-side hook. It’s called
+in worker process.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>message</strong> – incoming message.</p></li>
+<li><p><strong>result</strong> – result of execution for current task.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="silverback.middlewares.SilverbackMiddleware.pre_execute">
+<span class="sig-name descname"><span class="pre">pre_execute</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">TaskiqMessage</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">TaskiqMessage</span></span></span><a class="headerlink" href="#silverback.middlewares.SilverbackMiddleware.pre_execute" title="Link to this definition"></a></dt>
+<dd><p>This hook is called before executing task.</p>
+<p>This is a worker-side hook, which means it
+executes in the worker process.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>message</strong> – incoming parsed taskiq message.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>modified message.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
 </section>
 
         </article><button class="back-to-top" type="button">
@@ -133,10 +184,10 @@ silverback as a whole, and add integrations for the silverback platform as well.
         <span>Previous</span><div class="title">silverback.main</div></div>
     </a>
   </div><div class="navigation-next">
-    <a href="runner.html">
+    <a href="recorder.html">
       <div class="page-info">
         <span>Next</span>
-        <div class="title">silverback.runner</div>
+        <div class="title">silverback.recorder</div>
       </div>
       <i class="i-lucide chevron-right"></i>
     </a>
@@ -164,8 +215,8 @@ silverback as a whole, and add integrations for the silverback platform as well.
       <script src="../_static/jquery.js?v=5d32c60e"></script>
       <script src="../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
       <script src="../_static/documentation_options.js?v=5929fcd5"></script>
-      <script src="../_static/doctools.js?v=9a2dae69"></script>
+      <script src="../_static/doctools.js?v=9bcbadda"></script>
       <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
       <script data-domain="docs.apeworx.io" defer="defer" src="https://plausible.io/js/script.js"></script>
-      <script src="../_static/shibuya.js?v=e2e99575"></script></body>
+      <script src="../_static/shibuya.js?v=c1cf1a6b"></script></body>
 </html>

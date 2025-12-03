@@ -13,7 +13,7 @@ There are 3 suggested ways to structure your project. In the root directory of y
 
 1. Create a `bot.py` file. This is the simplest way to define your bot project.
 
-2. Create a `bots/` folder. Then develop bots in this folder as separate scripts (Do not include a __init__.py file).
+2. Create a `bots/` folder. Then develop bots in this folder as separate scripts (Do not include a `__init__.py` file).
 
 3. Create a `bot/` folder with a `__init__.py` file that will include the instantiation of your `SilverbackBot()` object.
 
@@ -73,7 +73,7 @@ If you follow these suggestions, your Silverback deployments will be easy to use
 
 Creating a Silverback Bot is easy, to do so initialize the `silverback.SilverbackBot` class:
 
-```py
+```python
 from silverback import SilverbackBot
 
 bot = SilverbackBot()
@@ -91,7 +91,7 @@ This method lets us specify which event will trigger the execution of our handle
 
 To add a block handler, you will do the following:
 
-```py
+```python
 from ape import chain
 
 @bot.on_(chain.blocks)
@@ -107,7 +107,7 @@ Any errors you raise during this function will get captured by the client, and r
 
 Similarly to blocks, you can handle events emitted by a contract by adding an event handler:
 
-```
+```python
 from ape import Contract
 
 TOKEN = Contract(<your token address here>)
@@ -121,13 +121,116 @@ Inside of `handle_token_transfer_events` you can define any logic that you want 
 Again, you can return any serializable data structure from this function and that will be stored in the results database as a trackable metric for the execution of this handler.
 Any errors you raise during this function will get captured by the client, and recorded as a failure to handle this `transfer` event log.
 
+### Event Log Filters
+
+You can also filter event logs by event parameters.
+For example, if you want to handle only `Transfer` events that represent a burn (a transfer to the zero address):
+
+```python
+@bot.on_(USDC.Transfer, to="0x0000000000000000000000000000000000000000")
+def handle_burn(log):
+    return {"burned": log.value}
+```
+
+In case an event parameter has a name that is an illegal keyword, we can also support a dictionary syntax:
+
+```python
+@bot.on_(USDC.Transfer, filter_args={"from":"0x0000000000000000000000000000000000000000"})
+def handle_burn(log):
+    return {"burned": log.value}
+```
+
+## Cron Tasks
+
+You may also want to run some tasks according to a schedule, either for efficiency reasons or just that the task is not related to any chain-driven events.
+You can do that with the `@cron` task decorator.
+
+```python
+@bot.cron("* */1 * * *")
+def every_hour():
+    ...
+```
+
+For more information see [the linux handbook section on the crontab syntax](https://linuxhandbook.com/crontab/#understanding-crontab-syntax) or the [crontab.guru](https://crontab.guru/) generator.
+
+## Defining Metrics
+
+Silverback has a built-in metrics collection system which can capture measurements made by your bots, which can assist you in debugging or performance monitoring.
+To capture a measurement of a metric datapoint, simply return boolean values or numeric data from your function handlers, or use any of our defined [Datapoint types](../methoddocs/types).
+When you return a datapoint measurement directly, the datapoint is stored using the label of it's function handler to append to a timeseries for the metric.
+When you return a dictionary containing multiple measurements, the string key corresponds to label of the metric you are capturing a datapoint for.
+
+Note that metric labels are tracked globally across your bot.
+If you generate metrics in two different function handlers that have the same string keys in the dictionary, they will both be appended to the same metric timeseries.
+
+For example, both of the following handlers `handlerA` and `handlerB` generate the `block_time` metric, along with the `block_time` handler which also generates a matching metric of the same name (because it does not return a dict):
+
+```python
+@bot.on_(my_contract.MyEvent)
+async def handlerA(log):
+    return dict(block_time=log.timestamp)
+
+@bot.cron("* * * * *")
+async def handlerB(time):
+    return {"block_time": int(time.timestamp())}
+
+@bot.on_(chain.blocks)
+async def block_time(block):
+    return block.timestamp
+```
+
+### Metric Callbacks
+
+A special feature of Silverback's metrics system is the ability to trigger tasks to execute when your metrics are produced.
+For example, say that you have a metric `current_price` that is computed every so often using a `cron` task trigger:
+
+```python
+@bot.cron("* * * * *")
+async def current_price(time):
+    current_price = ...
+    return current_price
+```
+
+You can then define a metric callback that is triggered whenever that metric is produced:
+
+```python
+@bot.on_metric("current_price")
+async def on_current_price(current_price: float):
+    ...  # Do something with the price
+```
+
+This can be particularly handy for definining conditions that trigger whenever a metric is conditionally produced.
+Let's say that you want to record a metric `pool_delta` whenever a particular trade is made using an event trigger:
+
+```python
+@bot.on_(pool.Swap)
+async def check_pool_balance(log):
+    if log.reserve0 > log.reserve1:
+        return dict(pool_delta=log.reserve0 - log.reserve1)
+```
+
+Then you want to trigger off of that metric, but only if it's value is _larger than a threshold_.
+We can use `gt=<threshold>` to do this:
+
+```python
+@bot.on_metric("pool_delta", gt=MIN_DELTA)
+async def perform_rebalance(pool_delta: int):
+    pool.rebalance(amount=pool_delta, ..., sender=bot.signer)
+```
+
+```{note}
+`.on_metric` supports 6 different value comparisons (`gt`, `ge`, `lt`, `le`, `ne`, and `eq`).
+When multiple comparisons are present, they are treated as a logical AND (meaning they must all be true for the task to execute).
+If you need a separate task to execute on different compound conditions, simply define extra tasks.
+```
+
 ## Startup and Shutdown
 
 ### Worker Events
 
 If you have heavier resources you want to load during startup, or want to initialize things like database connections, you can add a worker startup function like so:
 
-```py
+```python
 @bot.on_worker_startup()
 def handle_on_worker_startup(state):
     # Connect to DB, set initial state, etc
@@ -141,17 +244,17 @@ def handle_on_worker_shutdown(state):
 
 This function comes a parameter `state` that you can use for storing the results of your startup computation or resources that you have provisioned.
 
-It's import to note that this is useful for ensuring that your workers (of which there can be multiple) have the resources necessary to properly handle any updates you want to make in your handler functions, such as connecting to the Telegram API, an SQL or NoSQL database connection, or something else.  **This function will run on every worker process**.
+It's import to note that this is useful for ensuring that your workers (of which there can be multiple) have the resources necessary to properly handle any updates you want to make in your handler functions, such as connecting to the Telegram API, an SQL or NoSQL database connection, or something else. **This function will run on every worker process**.
 
-*New in 0.2.0*: These events moved from `on_startup()` and `on_shutdown()` for clarity.
+_New in 0.2.0_: These events moved from `on_startup()` and `on_shutdown()` for clarity.
 
 #### Worker State
 
-The `state` variable is also useful as this can be made available to each handler method so other stateful quantities can be maintained for other uses.  Each distributed worker has its own instance of state.
+The `state` variable is also useful as this can be made available to each handler method so other stateful quantities can be maintained for other uses. Each distributed worker has its own instance of state.
 
 To access the state from a handler, you must annotate `context` as a dependency like so:
 
-```py
+```python
 from typing import Annotated
 from taskiq import Context, TaskiqDepends
 
@@ -163,9 +266,9 @@ def block_handler(block, context: Annotated[Context, TaskiqDepends()]):
 
 ### Bot Events
 
-You can also add an bot startup and shutdown handler that will be **executed once upon every bot startup**.  This may be useful for things like processing historical events since the bot was shutdown or other one-time actions to perform at startup.
+You can also add an bot startup and shutdown handler that will be **executed once upon every bot startup**. This may be useful for things like processing historical events since the bot was shutdown or other one-time actions to perform at startup.
 
-```py
+```python
 @bot.on_startup()
 def handle_on_startup(startup_state):
     # Process missed events, etc
@@ -180,7 +283,7 @@ def handle_on_shutdown():
     ...
 ```
 
-*Changed in 0.2.0*: The behavior of the `@bot.on_startup()` decorator and handler signature have changed.  It is now executed only once upon bot startup and worker events have moved on `@bot.on_worker_startup()`.
+_Changed in 0.2.0_: The behavior of the `@bot.on_startup()` decorator and handler signature have changed. It is now executed only once upon bot startup and worker events have moved on `@bot.on_worker_startup()`.
 
 ## Bot State
 
@@ -192,7 +295,7 @@ For example, you might want to pre-populate a large dataframe into state on star
 and then use that data to determine a signal under which you want trigger transactions to commit back to the chain.
 Such an bot might look like this:
 
-```py
+```python
 @bot.on_startup()
 def create_table(startup_state):
     df = contract.MyEvent.query(..., start_block=startup_state.last_block_processed)
@@ -231,6 +334,61 @@ While not recommended, you can use keyfile accounts for automated signing.
 See [this guide](https://docs.apeworx.io/ape/stable/userguides/accounts.html#automation) to learn more about how to do that.
 ```
 
+### Managing nonces
+
+Since Silverback allows handling many events in parallel, and thus can allow you to submit multiple transactions in a short timespan (in fact, prior to successful confirmation of previously broadcasted transactions), it may become vital to do "nonce management" in order to ensure that you are not producing transactions that might conflict with one another.
+The `bot.nonce` variable tracks the last-used nonce of the `bot.signer`, incrementing it every time a new transaction is signed _during the bot's operation_.
+By using this variable via `nonce=bot.nonce` in your transactions (instead of `bot.signer.nonce`, which is the default behavior when the `nonce=` transaction kwarg is omitted), you can ensure that you do not produce transactions with conflicting nonces, even at a very high rate of parallel transaction creation.
+
+```{note}
+The value of `bot.nonce` is the maximum between the internally-stored "last-used nonce", and the value given by RPC method
+```
+
+```{warning}
+Make sure to use an appropiate gas pricing algorithm in order to prevent your chain of multiple transactions from becoming "stuck" because an earlier broadcasted transaction was under-priced
+```
+
+```{warning}
+Do *not* use the same account on the same network at the same time as the one in use by your bot, as this could lead to extremely undesirable behavior, stuck transactions, or transaction failures/loss of funds
+```
+
+## Cluster Access
+
+Sometimes, there are scenarios where you want to create a bot that has the capability to control other bots.
+This might make sense if you are having one bot that monitors a particular contract and interacts with all their events,
+and a version of that contract is deployed by another Factory contract.
+Another example is if you want a bot that monitors the performance of another bot,
+and then stops it if it discovers any issues encountered while monitoring it.
+
+Creating this type of setup allows a sort of "agentic scaling" where you can quickly scale up your bot cluster's
+on-chain "footprint" and cover more ground by having multiple other bots handling situations you encounter.
+This also can more effectively distribute the cluster load when you have large quantities of events to be handled,
+and need to dynamically scale in order to add more capacity in response to on-chain conditions.
+
+```py
+@bot.on_(factory.NewPool)
+async def deploy_arb_bot(log):
+    vg = bot.cluster.new_variable_group(
+        name=f"{log.token0}-{log.token1}-pool",
+        variables={"POOL": log.pool_address},
+    )
+    bot = bot.cluster.new_bot(
+        name=f"{log.token0}-{log.token1}-arb",
+        ...,
+        environment=[vg.name, ...],
+    )
+```
+
+```{important}
+Testing cluster access is not practical without deploying on the [Silverback Platform](./platform.html).
+The cluster implements additional authorization checks based on the `--cluster-access` flag provided
+with the [`silverback cluster bots new`](../commands/cluster#silverback-cluster-bots-new)
+and [`silverback cluster bots update`](../commands/cluster#silverback-cluster-bots-update) commands.
+```
+
+_Added in Silverback SDK [v0.7.35](https://github.com/ApeWorX/silverback/releases/tag/v0.7.35)_
+_Support added in Silverback Cluster [v0.7.0](https://silverback.apeworx.io/changelog#cluster-v0-7-0)_
+
 ## Running your Bot
 
 Once you have programmed your bot, it's really useful to be able to run it locally and validate that it does what you expect it to do.
@@ -248,7 +406,7 @@ $ silverback run my_bot --network :sepolia --account acct-name
 It's important to note that signers are optional, if not configured in the bot then `bot.signer` will be `None`.
 You can use this in your bot to enable a "test execution" mode, something like this:
 
-```py
+```python
 # Compute some metric that might lead to creating a transaction
 if bot.signer:
     # Execute a transaction via `sender=bot.signer`
@@ -266,12 +424,63 @@ It is highly suggested to use a dedicated cloud signer plugin, such as [`ape-aws
 Use segregated keys and limit your risk by controlling the amount of funds that key has access to at any given time.
 ```
 
+### Runtime Exceptions
+
+It is important to note that when running your bot with Silverback,
+a failure in one of your tasks while running **does not necessarily cause it to shutdown immediately**.
+This is done to support handling occasional failures and unexpected scenarios that might happen during the runtime of your bot in practice.
+The way it works is that during runtime (after the startup phase has completed successfully),
+the silverback runner will track the number of failures that occurs in _any_ task;
+and, if there is more than the configured amount of exceptions occuring across all of your tasks,
+only then will trigger a runtime Halt that will stop your bot from running (and trigger your shutdown tasks).
+
+You can configure this behavior when running with the [`silverback run ...`](../commands/run#silverback-run) command by changing the value of the `--max-exceptions` option.
+A higher number will take more failures in order to trigger a complete shutdown of the bot,
+whereas a lower number will make it more sensistive to intermittent failures you are likely to find in practice.
+The default is chosen as a good balance between sensitivity and operational robustness.
+
+```{warning}
+Any failures that occur in **any of your startup tasks** (including system-level startup tasks internal to the SDK) will cause an immediate failure,
+and prevent the bot from transitioning into runtime mode, where failure persistence becomes active.
+```
+
+This error tracking behavior in the runtime mode will occur handling any Python exception that your code is likely to raise.
+However, by raising the [`CircuitBreaker`](../methoddocs/exceptions#silverback.exceptions.CircuitBreaker) exception (or a subclass of it),
+you can cause your bot to **immediately shutdown** in response to application-specific faults you might detect.
+This might be useful if you know of a situation or invariant that you want to make sure to maintain during the operation of your bot no matter what,
+or if you detect that you no longer wish to run the bot any more for any desired reason (and want to handle it programmatically).
+
+```{note}
+Any failures detected during shutdown tasks do not prevent the execution of any other shutdown tasks
+(including system-level shutdown tasks internal to the SDK).
+```
+
+Lastly, you can insert a request during runtime to kill your bot manually by performing `ctrl+C`,
+or by sending a SIGTERM or SIGINT signal to the runtime process.
+This will trigger the same halting behavior immediately triggering your bot to move into the shutdown mode, and execute all shutdown tasks before exiting.
+
+### Metrics Collection
+
+To enable collection of metric data into session-based cache files, you need to enable the recording
+functionality on [`silverback run`](../commands/run#silverback-run) command via the `--record` flag.
+By default, `--record` uses the [`JSONLineRecorder`](../methoddocs/recorder#silverback.recorder.JSONLineRecorder)
+class, which journals your bot session's results to disk under timestamped files in
+`./.silverback-sessions/<bot name>/<ecosystem>/<network>/`.
+
+To assist you in loading the metrics from these files for things like analyzing them with DataFrame libraries,
+use the [`get_metrics`](../methoddocs/recorder#silverback.recorder.get_metrics) function.
+
+You can supply a custom class for recording via the `--recorder <path.to.module:ClassName>` option to the run command,
+or by supplying the `SILVERBACK_RECORDER_CLASS=<path.to.module:ClassName>` environment variable.
+All recorders should be a subclass of the [`BaseRecorder`](../methoddocs/recorder#silverback.recorder.BaseRecorder)
+abstract base class.
+
 ### Distributed Execution
 
 Using only the `silverback run ...` command in a default configuration executes everything in one process and the job queue is completely in-memory with a shared state.
 In some high volume environments, you may want to deploy your Silverback bot in a distributed configuration using multiple processes to handle the messages at a higher rate.
 
-The primary components are the client and workers.  The client handles Silverback events (blocks and contract event logs) and creates jobs for the workers to process in an asynchronous manner.
+The primary components are the client and workers. The client handles Silverback events (blocks and contract event logs) and creates jobs for the workers to process in an asynchronous manner.
 
 For this to work, you must configure a [TaskIQ broker](https://taskiq-python.github.io/guide/architecture-overview.html#broker) capable of distributed processing.
 Additonally, it is highly suggested you should also configure a [TaskIQ result backend](https://taskiq-python.github.io/guide/architecture-overview.html#result-backend) in order to process and store the results of executing tasks.

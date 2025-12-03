@@ -6,8 +6,8 @@
       <link rel="canonical" href="silverback/" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
-  </script><link rel="stylesheet" type="text/css" href="_static/pygments.css?v=397bb51e" />
-    <link rel="stylesheet" type="text/css" href="_static/shibuya.css?v=83eaa723" />
+  </script><link rel="stylesheet" type="text/css" href="_static/pygments.css?v=e1a1ceaf" />
+    <link rel="stylesheet" type="text/css" href="_static/shibuya.css?v=14737038" />
     <link media="print" rel="stylesheet" type="text/css" href="_static/print.css?v=20ff2c19" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,9 +19,9 @@
 }
 </style>
     <meta property="og:type" content="website"/>
-<meta property="og:url" content="silverback/"/>
-<meta property="og:title" content="&lt;no title&gt;"/>
-<meta name="twitter:card" content="summary"/>
+  <meta property="og:url" content="silverback/"/>
+  <meta property="og:title" content="&lt;no title&gt;"/>
+    <meta name="twitter:card" content="summary"/>
   </head>
 <body><div class="sy-head">
   <div class="sy-head-blur"></div>
@@ -31,7 +31,7 @@
       <img class="dark-logo" src="_static/logo_green.svg" alt="silverback" height="28" loading="lazy" />
       <strong>silverback</strong>
     </a>
-    <div class="sy-head-nav" id="HeadNav">
+    <div class="sy-head-nav" id="head-nav">
       <nav class="sy-head-links"></nav>
       <div class="sy-head-extra flex items-center print:hidden"><form class="searchbox flex items-center" action="search.html" method="get">
   <input type="text" name="q" placeholder="Search" />
@@ -43,11 +43,11 @@ data-aria-auto="Switch to light color mode"
 data-aria-light="Switch to dark color mode"
 data-aria-dark="Switch to auto color mode">
 <i class="i-lucide theme-icon"></i>
-</button><button class="md:hidden flex items-center js-menu" aria-label="Menu" type="button" aria-controls="HeadNav" aria-expanded="false">
+</button><button class="md:hidden flex items-center js-menu" aria-label="Menu" type="button" aria-controls="head-nav" aria-expanded="false">
         <div class="hamburger">
           <span class="hamburger_1"></span>
-          <span class="hamburger_2 -translate-x-2"></span>
-          <span class="hamburger_3 -translate-x-1"></span>
+          <span class="hamburger_2"></span>
+          <span class="hamburger_3"></span>
         </div>
       </button>
     </div>
@@ -61,20 +61,25 @@ data-aria-dark="Switch to auto color mode">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="userguides/quickstart.html">Quick Start</a></li>
 <li class="toctree-l1"><a class="reference internal" href="userguides/development.html">Developing Bots</a></li>
-<li class="toctree-l1"><a class="reference internal" href="userguides/platform.html">Deploying Bots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="userguides/managing.html">Silverback Platform</a></li>
+<li class="toctree-l1"><a class="reference internal" href="userguides/deploying.html">Deploying Bots</a></li>
 </ul>
 <p class="caption" role="heading" aria-level="3"><span class="caption-text">CLI Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="commands/cluster.html">Cloud Platform</a></li>
 <li class="toctree-l1"><a class="reference internal" href="commands/run.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="commands/cluster.html">Cloud Platform</a></li>
 </ul>
 <p class="caption" role="heading" aria-level="3"><span class="caption-text">Python Reference</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/cluster.html">silverback.cluster</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/exceptions.html">silverback.exceptions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/main.html">silverback.main</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/middlewares.html">silverback.middlewares</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/recorder.html">silverback.recorder</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/runner.html">silverback.runner</a></li>
-<li class="toctree-l1"><a class="reference internal" href="methoddocs/subscriptions.html">silverback.subscriptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/settings.html">silverback.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/state.html">silverback.state</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/types.html">silverback.types</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/utils.html">silverback.utils</a></li>
 </ul>
 
@@ -90,7 +95,8 @@ data-aria-dark="Switch to auto color mode">
     <div class="sy-scrollbar sy-rside-inner px-6 xl:top-16 xl:sticky xl:pl-0 pt-6 pb-4"><div id="ethical-ad-placement" data-ea-publisher="readthedocs"></div></div>
   </aside>
   <div class="rside-overlay js-menu" role="button" aria-label="Close Table of Contents" aria-controls="rside" aria-expanded="false"></div>
-  <main class="sy-main w-full max-sm:max-w-full print:pt-6"><div class="sy-breadcrumbs" role="navigation">
+  <main class="sy-main w-full max-sm:max-w-full print:pt-6">
+<div class="sy-breadcrumbs" role="navigation">
   <div class="sy-breadcrumbs-inner flex items-center">
     <div class="md:hidden mr-3">
       <button class="js-menu" aria-label="Menu" type="button" aria-controls="lside" aria-expanded="false">
@@ -120,24 +126,29 @@ data-aria-dark="Switch to auto color mode">
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="userguides/quickstart.html">Quick Start</a></li>
 <li class="toctree-l1"><a class="reference internal" href="userguides/development.html">Developing Bots</a></li>
-<li class="toctree-l1"><a class="reference internal" href="userguides/platform.html">Deploying Bots</a></li>
+<li class="toctree-l1"><a class="reference internal" href="userguides/managing.html">Silverback Platform</a></li>
+<li class="toctree-l1"><a class="reference internal" href="userguides/deploying.html">Deploying Bots</a></li>
 </ul>
 </div>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">CLI Reference</span></p>
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="commands/cluster.html">Cloud Platform</a></li>
 <li class="toctree-l1"><a class="reference internal" href="commands/run.html">Local Development</a></li>
+<li class="toctree-l1"><a class="reference internal" href="commands/cluster.html">Cloud Platform</a></li>
 </ul>
 </div>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">Python Reference</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/cluster.html">silverback.cluster</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/exceptions.html">silverback.exceptions</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/main.html">silverback.main</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/middlewares.html">silverback.middlewares</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/recorder.html">silverback.recorder</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/runner.html">silverback.runner</a></li>
-<li class="toctree-l1"><a class="reference internal" href="methoddocs/subscriptions.html">silverback.subscriptions</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/settings.html">silverback.settings</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/state.html">silverback.state</a></li>
+<li class="toctree-l1"><a class="reference internal" href="methoddocs/types.html">silverback.types</a></li>
 <li class="toctree-l1"><a class="reference internal" href="methoddocs/utils.html">silverback.utils</a></li>
 </ul>
 </div>
@@ -179,8 +190,8 @@ data-aria-dark="Switch to auto color mode">
       <script src="_static/jquery.js?v=5d32c60e"></script>
       <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
       <script src="_static/documentation_options.js?v=5929fcd5"></script>
-      <script src="_static/doctools.js?v=9a2dae69"></script>
+      <script src="_static/doctools.js?v=9bcbadda"></script>
       <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
       <script data-domain="docs.apeworx.io" defer="defer" src="https://plausible.io/js/script.js"></script>
-      <script src="_static/shibuya.js?v=e2e99575"></script></body>
+      <script src="_static/shibuya.js?v=c1cf1a6b"></script></body>
 </html>
